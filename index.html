@@ -64,7 +64,7 @@ label.btn{cursor:pointer}
 .books .del{background:none;border:0;color:var(--muted);font-size:18px;padding:6px 10px}
 
 /* reader */
-#viewer{flex:1;min-height:0;position:relative;background:var(--paper);padding:0 22px}
+#viewer{flex:1;min-height:0;position:relative;background:var(--paper);padding:0 24px}
 .bar{display:flex;align-items:center;justify-content:space-between;flex:none;
   padding:4px 10px calc(4px + env(safe-area-inset-bottom));background:var(--paper);border-top:1px solid var(--line);
   color:var(--muted);font-size:13px}
@@ -135,6 +135,11 @@ html.fs-on #reader:not(.hidden) #fsExit{display:grid}
 html.fs-on #reader>.top,html.fs-on #reader>.bar{display:none}
 html.fs-on .sheet.atop{top:0}
 #viewer,#viewer *{scrollbar-width:none}
+#fsStatus{position:absolute;left:16px;right:16px;bottom:9px;z-index:5;display:none;gap:12px;align-items:center;
+  font:12.5px/1 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--muted);pointer-events:none}
+html.fs-on #reader:not(.hidden) #fsStatus{display:flex}
+#stChap{flex:1;min-width:0;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#stTime{font-weight:600}
 #viewer ::-webkit-scrollbar{display:none}
 html.fs-on #reader:not(.hidden) #viewer{padding-bottom:40px}
 html.fs-on #reader:not(.hidden) #viewer{padding-top:max(env(safe-area-inset-top,0px),30px)}
@@ -183,6 +188,7 @@ html.fs-on #reader:not(.hidden) #viewer{padding-top:max(env(safe-area-inset-top,
       </button>
     </header>
     <div id="viewer"></div>
+    <div id="fsStatus"><span id="stTime"></span><span id="stChap"></span><span id="stPct"></span></div>
     <button id="fsExit" aria-label="Exit full screen"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <footer class="bar">
       <button id="prev" class="pg" aria-label="Previous page">‹</button>
@@ -213,6 +219,7 @@ html.fs-on #reader:not(.hidden) #viewer{padding-top:max(env(safe-area-inset-top,
     <div class="row themes">
       <button class="btn th" data-theme="light">Light</button>
       <button class="btn th" data-theme="sepia">Sepia</button>
+      <button class="btn th" data-theme="paper">Paper</button>
       <button class="btn th" data-theme="dark">Dark</button>
     </div>
   </div>
@@ -564,6 +571,7 @@ $('file').addEventListener('change', async (e) => {
 const THEMES = {
   light: { bg: '#fffdf7', fg: '#1d1d1b' },
   sepia: { bg: '#f4ecd8', fg: '#3b2f1d' },
+  paper: { bg: '#e9e8e4', fg: '#1d1d1b' },
   dark: { bg: '#161a22', fg: '#d9dbe0' }
 };
 function applyTheme() {
@@ -601,6 +609,7 @@ async function openBook(data, meta) {
       const d = loc.start.displayed || { page: 1, total: 1 };
       const pct = Math.min(1, (idx + (d.page - 1) / Math.max(1, d.total)) / spineLen);
       $('pct').textContent = Math.round(pct * 100) + '%';
+      statusLoc = loc; statusPct = pct; paintStatus();
       meta.cfi = loc.start.cfi; meta.pct = pct; meta.ts = Date.now();
       clearTimeout(openBook._t); openBook._t = setTimeout(() => dbPut('meta', meta), 400);
     });
@@ -614,16 +623,26 @@ function goHome() {
   $('reader').classList.add('hidden'); $('home').classList.remove('hidden');
   renderHome();
 }
+let tocMap = {}, statusLoc = null, statusPct = 0;
+function paintStatus() {
+  const loc = statusLoc; if (!loc) return;
+  const d = loc.start.displayed || { page: 1, total: 1 };
+  const key = ((loc.start.href || '').split('#')[0]).split('/').pop();
+  $('stChap').textContent = (tocMap[key] ? tocMap[key] + ' ' : '') + '(' + d.page + '/' + d.total + ')';
+  $('stPct').textContent = (statusPct * 100).toFixed(1) + '%';
+}
 function buildToc(items) {
-  const ul = $('tocList'); ul.innerHTML = '';
+  const ul = $('tocList'); ul.innerHTML = ''; tocMap = {};
   const walk = (list, depth) => list.forEach((it) => {
     const li = document.createElement('li'); const b = document.createElement('button');
     b.textContent = (it.label || '').trim(); b.style.paddingLeft = (18 + depth * 16) + 'px';
     b.onclick = () => { rendition.display(it.href); closeAll(); };
     li.appendChild(b); ul.appendChild(li);
+    const key = (it.href || '').split('#')[0].split('/').pop(); if (key && !tocMap[key]) tocMap[key] = (it.label || '').trim();
     if (it.subitems && it.subitems.length) walk(it.subitems, depth + 1);
   });
   walk(items, 0);
+  paintStatus();
 }
 
 /* ----- tap on a word inside the book ----- */
@@ -677,7 +696,7 @@ function sentenceAround(hit) {
 function setupContents(contents) {
   const doc = contents.document, win = contents.window;
   const st = doc.createElement('style');
-  st.textContent = '::highlight(lesen){background:#f6df9a;color:#5a3b00}html{-webkit-user-select:none;user-select:none}html,body{scrollbar-width:none}::-webkit-scrollbar{display:none}';
+  st.textContent = '::highlight(lesen){background:#f6df9a;color:#5a3b00}html{-webkit-user-select:none;user-select:none}html,body{scrollbar-width:none}::-webkit-scrollbar{display:none}p,li,blockquote,div{line-height:1.4!important}p{margin-top:0!important;margin-bottom:.1em!important}';
   doc.head.appendChild(st);
   doc.addEventListener('click', (e) => onTap(e, doc, win));
   let sx = 0, sy = 0, moved = false;
@@ -695,6 +714,8 @@ function onKey(e) {
   else if (e.key === 'Escape') hideSheet();
 }
 document.addEventListener('keydown', onKey);
+function tick() { const n = new Date(); $('stTime').textContent = String(n.getHours()).padStart(2, '0') + ':' + String(n.getMinutes()).padStart(2, '0'); }
+tick(); setInterval(tick, 15000);
 if (window.ResizeObserver) {
   let rt; new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { if (rendition) { try { rendition.resize(); } catch (e) {} } }, 120); }).observe($('viewer'));
 }
