@@ -64,7 +64,7 @@ label.btn{cursor:pointer}
 .books .del{background:none;border:0;color:var(--muted);font-size:18px;padding:6px 10px}
 
 /* reader */
-#viewer{flex:1;min-height:0;position:relative;background:var(--paper);padding:0 6px}
+#viewer{flex:1;min-height:0;position:relative;background:var(--paper);padding:0 22px}
 .bar{display:flex;align-items:center;justify-content:space-between;flex:none;
   padding:4px 10px calc(4px + env(safe-area-inset-bottom));background:var(--paper);border-top:1px solid var(--line);
   color:var(--muted);font-size:13px}
@@ -134,6 +134,7 @@ label.btn{cursor:pointer}
 html.fs-on #reader:not(.hidden) #fsExit{display:grid}
 html.fs-on #reader>.top,html.fs-on #reader>.bar{display:none}
 html.fs-on .sheet.atop{top:0}
+html.fs-on #reader:not(.hidden) #viewer{padding-bottom:40px}
 html.fs-on #reader:not(.hidden) #viewer{padding-top:max(env(safe-area-inset-top,0px),30px)}
 </style>
 </head>
@@ -692,6 +693,17 @@ function onKey(e) {
   else if (e.key === 'Escape') hideSheet();
 }
 document.addEventListener('keydown', onKey);
+/* margins around the text always turn the page, so no word is ever hit by accident */
+$('viewer').addEventListener('click', (e) => {
+  const v = $('viewer');
+  if (e.target !== v || !rendition) return;
+  const r = v.getBoundingClientRect(), cs = getComputedStyle(v);
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  if (y < parseFloat(cs.paddingTop)) return;                      // top gap: ignore
+  hideSheet();
+  if (y > r.height - parseFloat(cs.paddingBottom)) { x < r.width * 0.35 ? rendition.prev() : rendition.next(); }   // bottom strip (full screen)
+  else { x < r.width / 2 ? rendition.prev() : rendition.next(); }  // left / right side strips
+});
 
 function clearHL() { try { if (currentHL) { currentHL.win.CSS.highlights.delete('lesen'); } } catch (e) {} currentHL = null; }
 function setHL(win, range) {
