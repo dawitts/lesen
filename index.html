@@ -134,6 +134,8 @@ label.btn{cursor:pointer}
 html.fs-on #reader:not(.hidden) #fsExit{display:grid}
 html.fs-on #reader>.top,html.fs-on #reader>.bar{display:none}
 html.fs-on .sheet.atop{top:0}
+#viewer,#viewer *{scrollbar-width:none}
+#viewer ::-webkit-scrollbar{display:none}
 html.fs-on #reader:not(.hidden) #viewer{padding-bottom:40px}
 html.fs-on #reader:not(.hidden) #viewer{padding-top:max(env(safe-area-inset-top,0px),30px)}
 </style>
@@ -675,7 +677,7 @@ function sentenceAround(hit) {
 function setupContents(contents) {
   const doc = contents.document, win = contents.window;
   const st = doc.createElement('style');
-  st.textContent = '::highlight(lesen){background:#f6df9a;color:#5a3b00}html{-webkit-user-select:none;user-select:none}';
+  st.textContent = '::highlight(lesen){background:#f6df9a;color:#5a3b00}html{-webkit-user-select:none;user-select:none}html,body{scrollbar-width:none}::-webkit-scrollbar{display:none}';
   doc.head.appendChild(st);
   doc.addEventListener('click', (e) => onTap(e, doc, win));
   let sx = 0, sy = 0, moved = false;
@@ -693,6 +695,9 @@ function onKey(e) {
   else if (e.key === 'Escape') hideSheet();
 }
 document.addEventListener('keydown', onKey);
+if (window.ResizeObserver) {
+  let rt; new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { if (rendition) { try { rendition.resize(); } catch (e) {} } }, 120); }).observe($('viewer'));
+}
 /* margins around the text always turn the page, so no word is ever hit by accident */
 $('viewer').addEventListener('click', (e) => {
   const v = $('viewer');
@@ -917,6 +922,8 @@ $('dlTsv').onclick = () => {
     de.classList.toggle('fs-on', on);
     setTimeout(() => window.dispatchEvent(new Event('resize')), 120);
     setTimeout(() => window.dispatchEvent(new Event('resize')), 450);
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 1000);
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 1800);
     document.querySelectorAll('.fsb').forEach((b) => {
       b.querySelector('.fsp').setAttribute('d', on ? SHRINK : EXPAND);
       b.setAttribute('aria-label', on ? 'Exit full screen' : 'Full screen');
