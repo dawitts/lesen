@@ -801,7 +801,7 @@ function sentenceAround(hit) {
 function setupContents(contents) {
   const doc = contents.document, win = contents.window;
   const st = doc.createElement('style');
-  st.textContent = '::highlight(savedw){background:rgba(70,130,210,.24)}::highlight(lesen){background:#f6df9a;color:#5a3b00}html{-webkit-user-select:none;user-select:none}html{overflow:hidden!important}html,body{scrollbar-width:none;overscroll-behavior:none}::-webkit-scrollbar{display:none}p,li,blockquote,div{line-height:1.4!important}p{margin-top:0!important;margin-bottom:.1em!important}';
+  st.textContent = '::highlight(savedw){background:rgba(70,130,210,.24)}::highlight(lesen){background:#f6df9a;color:#5a3b00}html{-webkit-user-select:none;user-select:none}html,body{scrollbar-width:none}::-webkit-scrollbar{display:none}p,li,blockquote,div{line-height:1.4!important}p{margin-top:0!important;margin-bottom:.1em!important}';
   doc.head.appendChild(st);
   doc.addEventListener('click', (e) => onTap(e, doc, win));
   let sx = 0, sy = 0, moved = false;

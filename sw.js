@@ -1,6 +1,6 @@
 /* Lesen service worker: cache once, then run fully offline.
    When you change index.html, bump VERSION so installed apps pick up the update. */
-const VERSION = 'v9';
+const VERSION = 'v10';
 const CACHE = 'lesen-' + VERSION;
 const PAGE = './';
 const ASSETS = [PAGE, './manifest.webmanifest', './icon-192.png', './icon-512.png'];
