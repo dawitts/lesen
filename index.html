@@ -128,6 +128,17 @@ label.btn{cursor:pointer}
 .fsb{margin-left:auto}
 .reader-fs{margin-left:0}
 #installBtn{margin-top:12px}
+.btn.danger{color:#b3261e;border-color:#b3261e}
+.card{padding:16px}
+.rv-n{font-size:13px;color:var(--muted)}
+.rv-w{font:700 34px/1.2 Georgia,serif;margin:16px 0 8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.rv-g{display:flex;gap:12px;margin-top:18px}
+.rv-g .btn{flex:1;text-align:center}
+.rv-a .gloss{font-size:20px;margin-top:8px}
+#reviewBody h3{margin:8px 0}
+#reviewBody .ctx{font-style:italic;color:var(--muted);margin-top:6px}
+#reviewBody mark{background:#f6df9a;color:#5a3b00;border-radius:3px;padding:0 2px}
+#reviewBody .spk{background:none;border:0;color:var(--navy);padding:4px}
 #fsExit{position:absolute;top:8px;right:8px;z-index:15;width:38px;height:38px;border:0;border-radius:50%;
   background:rgba(36,63,115,.5);color:#fff;display:none;place-items:center}
 #fsExit:active{background:rgba(36,63,115,.85)}
@@ -135,13 +146,13 @@ html.fs-on #reader:not(.hidden) #fsExit{display:grid}
 html.fs-on #reader>.top,html.fs-on #reader>.bar{display:none}
 html.fs-on .sheet.atop{top:0}
 #viewer,#viewer *{scrollbar-width:none}
-#fsStatus{position:absolute;left:16px;right:16px;bottom:9px;z-index:5;display:none;gap:12px;align-items:center;
+#fsStatus{position:absolute;left:16px;right:16px;bottom:5px;z-index:5;display:none;gap:12px;align-items:center;
   font:12.5px/1 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--muted);pointer-events:none}
 html.fs-on #reader:not(.hidden) #fsStatus{display:flex}
 #stChap{flex:1;min-width:0;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #stTime{font-weight:600}
 #viewer ::-webkit-scrollbar{display:none}
-html.fs-on #reader:not(.hidden) #viewer{padding-bottom:40px}
+html.fs-on #reader:not(.hidden) #viewer{padding-bottom:22px}
 html.fs-on #reader:not(.hidden) #viewer{padding-top:max(env(safe-area-inset-top,0px),30px)}
 </style>
 </head>
@@ -167,6 +178,7 @@ html.fs-on #reader:not(.hidden) #viewer{padding-top:max(env(safe-area-inset-top,
       <p id="nobooks" class="muted">No books yet.</p>
 
       <button id="homeWords" class="btn">Saved words (<span id="wc">0</span>)</button>
+      <button id="homeReview" class="btn" style="margin-top:10px">Review words</button>
       <p id="storewarn" class="muted warn hidden">This browser won't store books, so you'll need to pick the file again each time.</p>
     </main>
   </section>
@@ -216,6 +228,7 @@ html.fs-on #reader:not(.hidden) #viewer{padding-top:max(env(safe-area-inset-top,
       <span id="fontVal">100%</span>
       <button id="fontUp" class="btn">A+</button>
     </div>
+    <div class="row"><button id="awakeBtn" class="btn">Keep screen on: On</button></div>
     <div class="row themes">
       <button class="btn th" data-theme="light">Light</button>
       <button class="btn th" data-theme="sepia">Sepia</button>
@@ -227,11 +240,23 @@ html.fs-on #reader:not(.hidden) #viewer{padding-top:max(env(safe-area-inset-top,
   <div id="words" class="drawer hidden">
     <div class="drawer-head"><b>Saved words</b><button class="x" data-close="words" aria-label="Close">✕</button></div>
     <div class="row wrap">
+      <button id="reviewBtn" class="btn primary hidden">Review</button>
       <button id="copyWords" class="btn">Copy words</button>
       <button id="dlTsv" class="btn">Download TSV (Anki)</button>
+      <button id="clearWords" class="btn danger hidden">Clear all</button>
+    </div>
+    <div class="row wrap">
+      <button id="backupBtn" class="btn">Backup</button>
+      <button id="restoreBtn" class="btn">Restore</button>
+      <input type="file" id="restoreFile" accept=".json,application/json" hidden>
     </div>
     <ul id="wordList" class="wordlist"></ul>
     <p id="nowords" class="muted">Nothing saved yet. Tap a word, then Save.</p>
+  </div>
+
+  <div id="review" class="drawer hidden">
+    <div class="drawer-head"><b>Review</b><button class="x" data-close="review" aria-label="Close">✕</button></div>
+    <div id="reviewBody" class="card"></div>
   </div>
 
   <div id="toast" class="toast hidden"></div>
@@ -516,12 +541,72 @@ async function lookup(word) {
 
 /* ---------- UI state ---------- */
 let book = null, rendition = null, currentMeta = null;
+let lastTap = null;
+let savedRe = null, savedT = null;
+const onlineCache = store.get('lesen.online', {});
+function saveOnline() { const ks = Object.keys(onlineCache); if (ks.length > 600) ks.slice(0, ks.length - 600).forEach((k) => delete onlineCache[k]); store.set('lesen.online', onlineCache); }
+async function fetchJson(url, ms) {
+  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), ms || 7000);
+  try { const r = await fetch(url, { signal: ac.signal }); if (!r.ok) return null; return await r.json(); } finally { clearTimeout(t); }
+}
+function stripHtml(h) {
+  const d = new DOMParser().parseFromString(h || '', 'text/html');
+  d.querySelectorAll('style,script,sup,ul,ol').forEach((n) => n.remove());
+  return (d.body.textContent || '').replace(/\s+/g, ' ').trim();
+}
+async function wiktionary(word) {
+  const lc = word.toLowerCase(), cap = lc.charAt(0).toUpperCase() + lc.slice(1);
+  const tries = [word]; if (lc !== word) tries.push(lc); if (cap !== word && cap !== lc) tries.push(cap);
+  for (const t of tries) {
+    const data = await fetchJson('https://en.wiktionary.org/api/rest_v1/page/definition/' + encodeURIComponent(t));
+    const de = data && data.de;
+    if (!de || !de.length) continue;
+    const parts = de.slice(0, 3).map((sec) => ({ pos: sec.partOfSpeech || '', defs: (sec.definitions || []).map((d) => stripHtml(d.definition)).filter(Boolean).slice(0, 4) })).filter((x) => x.defs.length);
+    if (parts.length) return { src: 'Wiktionary', parts };
+  }
+  return null;
+}
+async function myMemory(word) {
+  const d = await fetchJson('https://api.mymemory.translated.net/get?q=' + encodeURIComponent(word) + '&langpair=de|en');
+  const t = d && d.responseData && d.responseData.translatedText;
+  if (!t || t.toLowerCase() === word.toLowerCase() || /MYMEMORY|INVALID|QUERY LENGTH/i.test(t)) return null;
+  return { src: 'machine translation', parts: [{ pos: '', defs: [t] }] };
+}
+async function onlineLookup(word) {
+  const key = word.toLowerCase();
+  if (onlineCache[key]) return onlineCache[key];
+  let r = null;
+  try {
+    r = await wiktionary(word);
+    if (!r) r = await myMemory(word);
+  } catch (e) { return { error: true }; }
+  if (!r) return { none: true };
+  onlineCache[key] = r; saveOnline();
+  return r;
+}
+function onlineMeaning(w) { const r = onlineCache[w.toLowerCase()], f = r && r.parts && r.parts[0]; return f ? f.defs.slice(0, 2).join('; ') : ''; }
+function onlinePos(w) { const r = onlineCache[w.toLowerCase()], f = r && r.parts && r.parts[0]; return f ? f.pos : ''; }
+async function fillOnline(w) {
+  const box = $('onlineBox'); if (!box) return;
+  box.dataset.w = w;
+  const cached = onlineCache[w.toLowerCase()];
+  if (!cached) box.innerHTML = '<div class="spin">Looking online…</div>';
+  const r = cached || await onlineLookup(w);
+  const b = $('onlineBox');
+  if (!b || b.dataset.w !== w || $('sheet').classList.contains('hidden')) return;
+  if (r.error) { b.innerHTML = '<div class="note">No internet connection, so no online meaning.</div>'; return; }
+  if (r.none) { b.innerHTML = '<div class="note">Nothing found online either.</div>'; return; }
+  b.innerHTML = r.parts.map((pt) => '<div class="gloss">' + (pt.pos ? '<small>(' + esc(pt.pos) + ')</small> ' : '') + esc(pt.defs.slice(0, 3).join('; ')) + '</div>').join('') +
+    '<div class="note">from ' + esc(r.src) + '</div>';
+  const sw = words.find((x) => x.word === w && !x.meaning);
+  if (sw) { sw.meaning = onlineMeaning(w); sw.pos = onlinePos(w); saveWords(); }
+}
 let words = store.get('lesen.words', []);
 let known = new Set(store.get('lesen.known', []));
-const settings = Object.assign({ font: 110, theme: 'light' }, store.get('lesen.settings', {}));
+const settings = Object.assign({ font: 110, theme: 'light', awake: true }, store.get('lesen.settings', {}));
 let tapToken = 0, currentHL = null, currentCtx = null;
 
-const saveWords = () => { store.set('lesen.words', words); $('wc').textContent = words.length; $('wc2').textContent = words.length; };
+const saveWords = () => { store.set('lesen.words', words); $('wc').textContent = words.length; $('wc2').textContent = words.length; paintSaved(); };
 const saveKnown = () => store.set('lesen.known', [...known]);
 const saveSettings = () => store.set('lesen.settings', settings);
 function toast(msg) {
@@ -559,7 +644,11 @@ $('file').addEventListener('change', async (e) => {
     const data = await file.arrayBuffer();
     const id = file.name + '|' + file.size;
     let meta = await dbGet('meta', id);
-    if (!meta) { meta = { id, name: file.name, title: file.name.replace(/\.epub$/i, ''), pct: 0, cfi: null, ts: Date.now() }; }
+    if (!meta) {
+      meta = { id, name: file.name, title: file.name.replace(/\.epub$/i, ''), pct: 0, cfi: null, ts: Date.now() };
+      const pend = store.get('lesen.pending', {});
+      if (pend[id]) { meta.cfi = pend[id].cfi || null; meta.pct = pend[id].pct || 0; if (pend[id].title) meta.title = pend[id].title; delete pend[id]; store.set('lesen.pending', pend); }
+    }
     await dbPut('files', { id, data });
     await dbPut('meta', meta);
     e.target.value = '';
@@ -574,6 +663,22 @@ const THEMES = {
   paper: { bg: '#e9e8e4', fg: '#1d1d1b' },
   dark: { bg: '#161a22', fg: '#d9dbe0' }
 };
+let wl = null, wlBusy = false;
+const wantAwake = () => settings.awake && (!$('reader').classList.contains('hidden') || !$('review').classList.contains('hidden'));
+async function wakeSync() {
+  try {
+    if (!('wakeLock' in navigator)) return;
+    if (wantAwake() && document.visibilityState === 'visible') {
+      if (!wl && !wlBusy) {
+        wlBusy = true;
+        try { const l = await navigator.wakeLock.request('screen'); wl = l; l.addEventListener('release', () => { if (wl === l) wl = null; }); } finally { wlBusy = false; }
+      }
+    } else if (wl) { const l = wl; wl = null; await l.release(); }
+  } catch (e) { wl = null; wlBusy = false; }
+}
+document.addEventListener('visibilitychange', wakeSync);
+function paintAwake() { const b = $('awakeBtn'); b.textContent = 'Keep screen on: ' + (settings.awake ? 'On' : 'Off'); b.classList.toggle('on', !!settings.awake); }
+$('awakeBtn').onclick = () => { settings.awake = !settings.awake; saveSettings(); paintAwake(); wakeSync(); };
 function applyTheme() {
   const t = THEMES[settings.theme] || THEMES.light;
   $('viewer').style.background = t.bg;
@@ -588,7 +693,7 @@ function applyTheme() {
 
 async function openBook(data, meta) {
   closeAll();
-  $('home').classList.add('hidden'); $('reader').classList.remove('hidden');
+  $('home').classList.add('hidden'); $('reader').classList.remove('hidden'); wakeSync();
   $('title').textContent = meta.title || meta.name;
   $('pct').textContent = Math.round((meta.pct || 0) * 100) + '%';
   currentMeta = meta;
@@ -620,7 +725,7 @@ async function openBook(data, meta) {
 }
 function goHome() {
   closeAll(); hideSheet();
-  $('reader').classList.add('hidden'); $('home').classList.remove('hidden');
+  $('reader').classList.add('hidden'); $('home').classList.remove('hidden'); wakeSync();
   renderHome();
 }
 let tocMap = {}, statusLoc = null, statusPct = 0;
@@ -696,7 +801,7 @@ function sentenceAround(hit) {
 function setupContents(contents) {
   const doc = contents.document, win = contents.window;
   const st = doc.createElement('style');
-  st.textContent = '::highlight(lesen){background:#f6df9a;color:#5a3b00}html{-webkit-user-select:none;user-select:none}html,body{scrollbar-width:none}::-webkit-scrollbar{display:none}p,li,blockquote,div{line-height:1.4!important}p{margin-top:0!important;margin-bottom:.1em!important}';
+  st.textContent = '::highlight(savedw){background:rgba(70,130,210,.24)}::highlight(lesen){background:#f6df9a;color:#5a3b00}html{-webkit-user-select:none;user-select:none}html{overflow:hidden!important}html,body{scrollbar-width:none;overscroll-behavior:none}::-webkit-scrollbar{display:none}p,li,blockquote,div{line-height:1.4!important}p{margin-top:0!important;margin-bottom:.1em!important}';
   doc.head.appendChild(st);
   doc.addEventListener('click', (e) => onTap(e, doc, win));
   let sx = 0, sy = 0, moved = false;
@@ -706,6 +811,42 @@ function setupContents(contents) {
     if (Math.abs(dx) > 70 && Math.abs(dy) < 50) { hideSheet(); dx < 0 ? rendition.next() : rendition.prev(); }
   }, { passive: true });
   doc.addEventListener('keydown', onKey);
+  buildSavedRe(); paintSavedIn(contents);
+}
+function buildSavedRe() {
+  const ws = [...new Set(words.map((x) => x.word).filter(Boolean))].slice(0, 800).sort((a, b) => b.length - a.length);
+  if (!ws.length) { savedRe = null; return; }
+  const reEsc = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const alt = ws.map((w) => {
+    const c = w.charAt(0), up = c.toUpperCase(), lo = c.toLowerCase();
+    // lower-case words also match at the start of a sentence (capital first letter); nouns stay exact
+    return (c === lo && up.length === 1 && up !== c) ? '[' + c + up + ']' + reEsc(w.slice(1)) : reEsc(w);
+  }).join('|');
+  try { savedRe = new RegExp('(?<![\\p{L}\\p{M}])(?:' + alt + ')(?![\\p{L}\\p{M}])', 'gu'); } catch (e) { savedRe = null; }
+}
+function paintSavedIn(contents) {
+  try {
+    const win = contents.window, doc = contents.document;
+    if (!win.CSS || !win.CSS.highlights || !win.Highlight) return;
+    if (!savedRe) { win.CSS.highlights.delete('savedw'); return; }
+    const re = new RegExp(savedRe.source, savedRe.flags), ranges = [];
+    const tw = doc.createTreeWalker(doc.body, 4);
+    let n;
+    while ((n = tw.nextNode())) {
+      re.lastIndex = 0; let m;
+      while ((m = re.exec(n.data))) {
+        if (!m[0]) { re.lastIndex++; continue; }
+        const r = doc.createRange(); r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length); ranges.push(r);
+      }
+    }
+    if (!ranges.length) { win.CSS.highlights.delete('savedw'); return; }
+    const h = new win.Highlight(...ranges); try { h.priority = 1; } catch (e) {}
+    win.CSS.highlights.set('savedw', h);
+  } catch (e) {}
+}
+function paintSaved() {
+  clearTimeout(savedT);
+  savedT = setTimeout(() => { buildSavedRe(); try { if (rendition) rendition.getContents().forEach(paintSavedIn); } catch (e) {} }, 150);
 }
 function onKey(e) {
   if (!rendition) return;
@@ -716,9 +857,29 @@ function onKey(e) {
 document.addEventListener('keydown', onKey);
 function tick() { const n = new Date(); $('stTime').textContent = String(n.getHours()).padStart(2, '0') + ':' + String(n.getMinutes()).padStart(2, '0'); }
 tick(); setInterval(tick, 15000);
-if (window.ResizeObserver) {
-  let rt; new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { if (rendition) { try { rendition.resize(); } catch (e) {} } }, 120); }).observe($('viewer'));
+function fitBook(force) {
+  if (!rendition || $('reader').classList.contains('hidden')) return;
+  const v = $('viewer'), cs = getComputedStyle(v);
+  const w = Math.floor(v.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight));
+  const h = Math.floor(v.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom));
+  if (w < 50 || h < 50) return;
+  const f = v.querySelector('iframe');
+  if (!force && f && Math.abs(Math.round(f.getBoundingClientRect().height) - h) <= 2) return;
+  try { rendition.resize(w, h); } catch (e) {}
+  // epub.js ignores a resize to a size it already knows; if the page is still the wrong height, nudge it
+  clearTimeout(fitBook._t);
+  fitBook._t = setTimeout(() => {
+    const f2 = v.querySelector('iframe');
+    if (f2 && Math.abs(Math.round(f2.getBoundingClientRect().height) - h) > 2) {
+      try { rendition.resize(w, h - 2); setTimeout(() => { try { rendition.resize(w, h); } catch (e) {} }, 250); } catch (e) {}
+    }
+  }, 700);
 }
+if (window.ResizeObserver) {
+  let rt; new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => fitBook(), 120); }).observe($('viewer'));
+}
+if (window.visualViewport) window.visualViewport.addEventListener('resize', () => fitBook());
+setInterval(() => fitBook(), 1500);
 /* margins around the text always turn the page, so no word is ever hit by accident */
 $('viewer').addEventListener('click', (e) => {
   const v = $('viewer');
@@ -734,7 +895,7 @@ $('viewer').addEventListener('click', (e) => {
 function clearHL() { try { if (currentHL) { currentHL.win.CSS.highlights.delete('lesen'); } } catch (e) {} currentHL = null; }
 function setHL(win, range) {
   clearHL();
-  try { if (win.CSS && win.CSS.highlights && win.Highlight) { win.CSS.highlights.set('lesen', new win.Highlight(range)); currentHL = { win }; } } catch (e) {}
+  try { if (win.CSS && win.CSS.highlights && win.Highlight) { const hl = new win.Highlight(range); try { hl.priority = 5; } catch (e2) {} win.CSS.highlights.set('lesen', hl); currentHL = { win }; } } catch (e) {}
 }
 
 async function onTap(e, doc, win) {
@@ -748,6 +909,11 @@ async function onTap(e, doc, win) {
     if (frac < 0.18) rendition.prev(); else if (frac > 0.82) rendition.next();
     return;
   }
+  if (lastTap && !$('sheet').classList.contains('hidden') && lastTap.node === hit.range.startContainer && lastTap.off === hit.range.startOffset) {
+    if (lastTap.save) lastTap.save();
+    return;
+  }
+  lastTap = { word: hit.word, node: hit.range.startContainer, off: hit.range.startOffset, save: null };
   const token = ++tapToken;
   setHL(win, hit.range);
   const sent = sentenceAround(hit);
@@ -765,7 +931,8 @@ async function onTap(e, doc, win) {
 }
 
 /* ----- bottom sheet ----- */
-function hideSheet() { tapToken++; $('sheet').classList.add('hidden'); clearHL(); }
+function hideSheet() { tapToken++; lastTap = null; $('sheet').classList.add('hidden'); clearHL(); }
+document.addEventListener('click', (e) => { const sh = $('sheet'); if (!sh.classList.contains('hidden') && !sh.contains(e.target)) hideSheet(); }, true);
 $('sheetClose').onclick = hideSheet;
 function ctxHtml(sent) {
   const t = sent.text, a = sent.a, b = sent.b;
@@ -827,6 +994,7 @@ function renderSheet(res, sent) {
     const lit = /^[A-Za-z][A-Za-z -]*$/.test(g1) && !/\b(sth|sb)\b/.test(g1) ? ', literally “little ' + g1 + '”' : '';
     h += '<div class="note">Diminutive of <b>' + esc(res.dim.stem) + '</b> (' + esc(gl.join('; ')) + ')' + esc(lit) + '</div>';
   }
+  if (!res.groups.length) h += '<div id="onlineBox"></div>';
   h += '<hr><div class="ctx">' + ctxHtml(sent) + '</div>';
   h += '<div class="acts"><button id="saveBtn" class="btn' + (saved ? ' on' : '') + '">' + (saved ? '✓ Saved' : 'Save to practice') + '</button>' +
        '<button id="knownBtn" class="btn' + (isKnown ? ' on' : '') + '">' + (isKnown ? '✓ Known' : 'Known') + '</button>' +
@@ -839,12 +1007,14 @@ function renderSheet(res, sent) {
     const i = words.findIndex((x) => x.word === w);
     if (i >= 0) { words.splice(i, 1); toast('Removed'); }
     else {
-      words.unshift({ word: w, lemma: p ? p.lemma : w, meaning: p ? p.text : '', pos: p ? p.tag : '', sentence: sent.text, book: currentMeta ? currentMeta.title : '', ts: Date.now() });
+      words.unshift({ word: w, lemma: p ? p.lemma : w, meaning: p ? p.text : onlineMeaning(w), pos: p ? p.tag : onlinePos(w), sentence: sent.text, book: currentMeta ? currentMeta.title : '', ts: Date.now() });
       toast('Saved');
     }
     saveWords(); renderSheet(res, sent);
   };
   $('knownBtn').onclick = () => { const k = w.toLowerCase(); if (known.has(k)) known.delete(k); else known.add(k); saveKnown(); renderSheet(res, sent); };
+  if (lastTap && lastTap.word === w) lastTap.save = () => { if (words.some((x) => x.word === w)) toast('Already saved'); else $('saveBtn').click(); };
+  if (!res.groups.length) fillOnline(w);
   const mb = $('moreBtn');
   if (mb) mb.onclick = () => {
     const box = $('moreBox');
@@ -858,8 +1028,8 @@ function renderSheet(res, sent) {
 }
 
 /* ---------- drawers ---------- */
-function closeAll() { ['toc', 'settings', 'words'].forEach((i) => $(i).classList.add('hidden')); }
-document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = () => $(b.dataset.close).classList.add('hidden')));
+function closeAll() { ['toc', 'settings', 'words', 'review'].forEach((i) => $(i).classList.add('hidden')); }
+document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = () => { $(b.dataset.close).classList.add('hidden'); wakeSync(); }));
 $('tocBtn').onclick = () => { closeAll(); hideSheet(); $('toc').classList.remove('hidden'); };
 $('aaBtn').onclick = () => { const was = !$('settings').classList.contains('hidden'); closeAll(); hideSheet(); if (!was) $('settings').classList.remove('hidden'); };
 $('back').onclick = goHome;
@@ -868,12 +1038,16 @@ $('next').onclick = () => { hideSheet(); rendition && rendition.next(); };
 $('fontDown').onclick = () => { settings.font = Math.max(70, settings.font - 10); saveSettings(); applyTheme(); };
 $('fontUp').onclick = () => { settings.font = Math.min(220, settings.font + 10); saveSettings(); applyTheme(); };
 document.querySelectorAll('.th').forEach((b) => (b.onclick = () => { settings.theme = b.dataset.theme; saveSettings(); applyTheme(); }));
-window.addEventListener('resize', () => { if (rendition) { try { rendition.resize(); } catch (e) {} } });
+window.addEventListener('resize', () => fitBook());
 
 function openWords() {
   closeAll(); hideSheet();
   const ul = $('wordList'); ul.innerHTML = '';
   $('nowords').classList.toggle('hidden', words.length > 0);
+  $('clearWords').classList.toggle('hidden', words.length === 0);
+  $('reviewBtn').classList.toggle('hidden', words.length === 0);
+  $('reviewBtn').textContent = 'Review (' + dueWords().length + ' due)';
+  resetClear();
   words.forEach((x, i) => {
     const li = document.createElement('li');
     li.innerHTML = '<button class="r">remove</button><div class="w"></div><div class="m"></div><div class="s"></div>';
@@ -885,6 +1059,13 @@ function openWords() {
   });
   $('words').classList.remove('hidden');
 }
+let clearT = null;
+function resetClear() { clearTimeout(clearT); $('clearWords').textContent = 'Clear all'; $('clearWords').dataset.armed = ''; }
+$('clearWords').onclick = () => {
+  const b = $('clearWords');
+  if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Tap again to delete all ' + words.length; clearT = setTimeout(resetClear, 4000); return; }
+  words = []; saveWords(); toast('All saved words cleared'); openWords();
+};
 $('wordsBtn').onclick = openWords;
 $('homeWords').onclick = openWords;
 $('copyWords').onclick = async () => {
@@ -904,9 +1085,118 @@ $('dlTsv').onclick = () => {
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 };
 
+/* ---------- flashcard review ---------- */
+const BOX_DAYS = [0, 1, 3, 7, 16, 35];
+let rq = [], rcur = null, rshown = false, rdone = 0, rtotal = 0, rvLooking = false;
+const dueWords = () => { const now = Date.now(); return words.filter((x) => !x.due || x.due <= now); };
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function openReview() {
+  closeAll(); hideSheet();
+  rq = shuffle(dueWords()).slice(0, 30); rdone = 0; rtotal = rq.length;
+  $('review').classList.remove('hidden'); wakeSync();
+  nextCard();
+}
+function nextCard() { rcur = rq.shift() || null; rshown = false; renderCard(); }
+function markCtx(x) {
+  const t = x.sentence || ''; if (!t) return '';
+  const i = t.indexOf(x.word); if (i < 0) return esc(t);
+  return esc(t.slice(0, i)) + '<mark>' + esc(t.slice(i, i + x.word.length)) + '</mark>' + esc(t.slice(i + x.word.length));
+}
+async function fillMeaning(x) {
+  rvLooking = true;
+  try {
+    const res = await lookup(x.word), p = primaryGloss(res);
+    if (p) { x.meaning = p.text; x.pos = x.pos || p.tag; x.lemma = x.lemma || p.lemma; }
+    else { const r = await onlineLookup(x.word); if (r && r.parts) { x.meaning = onlineMeaning(x.word); x.pos = x.pos || onlinePos(x.word); } }
+  } catch (e) {}
+  rvLooking = false;
+  if (x.meaning) saveWords();
+  if (rcur === x && rshown) renderCard();
+}
+function renderCard() {
+  const b = $('reviewBody');
+  if (!words.length) { b.innerHTML = '<p class="muted">Nothing to review yet. Save words while reading.</p>'; return; }
+  if (!rcur) {
+    const nextDue = words.map((x) => x.due || 0).filter((d) => d > Date.now()).sort((a, c) => a - c)[0];
+    let when = '';
+    if (nextDue) { const m = Math.max(1, Math.round((nextDue - Date.now()) / 60000)); when = m < 90 ? m + ' minutes' : m < 2880 ? Math.round(m / 60) + ' hours' : Math.round(m / 1440) + ' days'; }
+    b.innerHTML = '<h3>' + (rtotal ? 'All done' : 'Nothing due right now') + '</h3><p class="muted">' + (rtotal ? rdone + ' of ' + rtotal + ' cards reviewed. ' : '') + (nextDue ? 'The next card is due in ' + when + '.' : '') + '</p><div class="row"><button class="btn primary" id="rvClose">Close</button></div>';
+    $('rvClose').onclick = () => { $('review').classList.add('hidden'); wakeSync(); };
+    return;
+  }
+  const x = rcur;
+  let h = '<div class="rv-n">' + (rq.length + 1) + ' left</div><div class="rv-w"><span>' + esc(x.word) + '</span><button class="spk" id="rvSpk" aria-label="Pronounce"><svg viewBox="0 0 24 24" width="26" height="26"><path d="M4 9v6h4l5 4V5L8 9z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M16 8.5a5 5 0 010 7M18.5 6a8.5 8.5 0 010 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>';
+  if (x.sentence) h += '<div class="ctx">' + markCtx(x) + '</div>';
+  if (!rshown) h += '<div class="rv-g"><button class="btn primary big" id="rvShow">Show answer</button></div>';
+  else {
+    h += '<hr><div class="rv-a">' + (x.lemma && x.lemma !== x.word ? '<div class="formof">form of <b>' + esc(x.lemma) + '</b></div>' : '') +
+         '<div class="gloss">' + esc(x.meaning || (rvLooking ? 'Looking up…' : '(no meaning found)')) + (x.pos ? ' <small>(' + esc(x.pos) + ')</small>' : '') + '</div></div>' +
+         '<div class="rv-g"><button class="btn danger" id="rvAgain">Again</button><button class="btn primary" id="rvGood">Good</button></div>';
+  }
+  b.innerHTML = h;
+  $('rvSpk').onclick = () => { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(x.word); u.lang = 'de-DE'; speechSynthesis.speak(u); } catch (e) { toast('Speech not available'); } };
+  if ($('rvShow')) $('rvShow').onclick = () => { rshown = true; renderCard(); if (!x.meaning) fillMeaning(x); };
+  if ($('rvGood')) $('rvGood').onclick = () => gradeCard(true);
+  if ($('rvAgain')) $('rvAgain').onclick = () => gradeCard(false);
+}
+function gradeCard(ok) {
+  const x = rcur; if (!x) return;
+  if (ok) { x.box = Math.min(BOX_DAYS.length - 1, (x.box || 0) + 1); x.due = Date.now() + BOX_DAYS[x.box] * 864e5; rdone++; }
+  else { x.box = 0; x.due = Date.now() + 6e4; rq.push(x); }
+  saveWords(); nextCard();
+}
+$('reviewBtn').onclick = openReview;
+$('homeReview').onclick = openReview;
+
+/* ---------- backup / restore ---------- */
+$('backupBtn').onclick = async () => {
+  const progress = {};
+  (await dbAll('meta')).forEach((m) => { progress[m.id] = { title: m.title, cfi: m.cfi, pct: m.pct, ts: m.ts }; });
+  const pend = store.get('lesen.pending', {}); Object.keys(pend).forEach((k) => { if (!progress[k]) progress[k] = pend[k]; });
+  const data = { app: 'lesen', version: 1, exported: new Date().toISOString(), words, known: [...known], settings, online: onlineCache, progress };
+  const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = 'lesen-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  toast('Backup saved to your downloads');
+};
+$('restoreBtn').onclick = () => $('restoreFile').click();
+$('restoreFile').onchange = async (e) => {
+  const f = e.target.files && e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  try {
+    const d = JSON.parse(await f.text());
+    if (!d || d.app !== 'lesen' || !Array.isArray(d.words)) throw new Error('not a backup');
+    const have = new Map(words.map((x) => [x.word, x])); let added = 0;
+    d.words.forEach((x) => {
+      if (!x || !x.word) return;
+      const h = have.get(x.word);
+      if (!h) { words.push(x); have.set(x.word, x); added++; }
+      else { if (!h.meaning && x.meaning) { h.meaning = x.meaning; h.pos = x.pos || h.pos; } if (!h.box && x.box) { h.box = x.box; h.due = x.due; } }
+    });
+    words.sort((a, b) => (b.ts || 0) - (a.ts || 0)); saveWords();
+    (d.known || []).forEach((k) => known.add(k)); saveKnown();
+    if (d.settings) {
+      if (d.settings.font) settings.font = d.settings.font;
+      if (THEMES[d.settings.theme]) settings.theme = d.settings.theme;
+      if (typeof d.settings.awake === 'boolean') settings.awake = d.settings.awake;
+      saveSettings(); applyTheme(); paintAwake();
+    }
+    if (d.online) { Object.keys(d.online).forEach((k) => { if (!onlineCache[k]) onlineCache[k] = d.online[k]; }); saveOnline(); }
+    const byId = new Map((await dbAll('meta')).map((m) => [m.id, m])), pend = store.get('lesen.pending', {});
+    for (const id of Object.keys(d.progress || {})) {
+      const pr = d.progress[id], m = byId.get(id);
+      if (m) { if ((pr.ts || 0) > (m.ts || 0)) { m.cfi = pr.cfi; m.pct = pr.pct; m.ts = pr.ts; await dbPut('meta', m); } }
+      else pend[id] = pr;
+    }
+    store.set('lesen.pending', pend);
+    renderHome(); openWords(); toast('Restored: ' + added + ' new words');
+  } catch (err) { toast('That is not a Lesen backup file'); }
+};
+
 /* ---------- boot ---------- */
 (async function boot() {
-  saveWords();
+  saveWords(); paintAwake();
   const ds = $('dictstatus');
   try {
     if (typeof DecompressionStream === 'undefined') throw new Error('no DecompressionStream');
