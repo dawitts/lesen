@@ -925,11 +925,28 @@ async function onTap(e, doc, win) {
   try { res = await lookup(hit.word); } catch (err) { console.error(err); res = { word: hit.word, groups: [], dim: null, comp: null }; }
   if (token !== tapToken) return;
   renderSheet(res, sent);
-  if (!words.some((x) => x.word === res.word)) $('saveBtn').click();   // looking a word up saves it to practice
+  if (!words.some((x) => x.word === res.word)) { $('saveBtn').click(); lastAuto = res.word; }   // looking a word up saves it to practice; Undo is offered when the bar closes
 }
 
 /* ----- bottom sheet ----- */
-function hideSheet() { tapToken++; lastTap = null; $('sheet').classList.add('hidden'); clearHL(); }
+let lastAuto = null;
+function showUndo(w) {
+  const t = $('toast'); t.innerHTML = 'Saved \u201c' + esc(w) + '\u201d <button id="undoBtn" style="margin-left:10px;background:none;border:1px solid #fff;color:#fff;border-radius:14px;padding:4px 12px;font-size:14px;font-weight:600;cursor:pointer">Undo</button>';
+  t.style.pointerEvents = 'auto'; t.classList.remove('hidden');
+  $('undoBtn').onclick = (ev) => {
+    ev.stopPropagation(); clearTimeout(toast._t);
+    const i = words.findIndex((x) => x.word === w);
+    if (i >= 0) { words.splice(i, 1); saveWords(); }
+    t.style.pointerEvents = ''; toast('Removed');
+  };
+  clearTimeout(toast._t); toast._t = setTimeout(() => { t.classList.add('hidden'); t.style.pointerEvents = ''; }, 6000);
+}
+function hideSheet() {
+  const wasOpen = !$('sheet').classList.contains('hidden');
+  tapToken++; lastTap = null; $('sheet').classList.add('hidden'); clearHL();
+  if (wasOpen && lastAuto) { const w = lastAuto; lastAuto = null; if (words.some((x) => x.word === w)) showUndo(w); }
+  else if (wasOpen) lastAuto = null;
+}
 document.addEventListener('click', (e) => { const sh = $('sheet'); if (!sh.classList.contains('hidden') && !sh.contains(e.target)) { hideSheet(); e.stopPropagation(); e.preventDefault(); } }, true);
 $('sheetClose').onclick = hideSheet;
 function ctxHtml(sent) {
@@ -1002,6 +1019,7 @@ function renderSheet(res, sent) {
 
   $('spk').onclick = () => { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(w); u.lang = 'de-DE'; speechSynthesis.speak(u); } catch (e) { toast('Speech not available'); } };
   $('saveBtn').onclick = () => {
+    lastAuto = null;
     const i = words.findIndex((x) => x.word === w);
     if (i >= 0) { words.splice(i, 1); toast('Removed'); }
     else {
