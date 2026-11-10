@@ -931,15 +931,15 @@ async function onTap(e, doc, win) {
 /* ----- bottom sheet ----- */
 let lastAuto = null;
 function showUndo(w) {
-  const t = $('toast'); t.innerHTML = 'Saved \u201c' + esc(w) + '\u201d <button id="undoBtn" style="margin-left:10px;background:none;border:1px solid #fff;color:#fff;border-radius:14px;padding:4px 12px;font-size:14px;font-weight:600;cursor:pointer">Undo</button>';
-  t.style.pointerEvents = 'auto'; t.classList.remove('hidden');
+  const t = $('toast'); t.innerHTML = '<button id="undoBtn" style="background:rgba(34,34,34,.35);border:1px solid rgba(255,255,255,.7);color:#fff;text-shadow:0 0 3px #000;border-radius:16px;padding:6px 16px;font-size:14px;font-weight:600;cursor:pointer">Undo</button>';
+  t.style.cssText = 'background:transparent;padding:0;pointer-events:auto'; t.classList.remove('hidden');
   $('undoBtn').onclick = (ev) => {
     ev.stopPropagation(); clearTimeout(toast._t);
     const i = words.findIndex((x) => x.word === w);
     if (i >= 0) { words.splice(i, 1); saveWords(); }
-    t.style.pointerEvents = ''; toast('Removed');
+    t.style.cssText = ''; toast('Removed');
   };
-  clearTimeout(toast._t); toast._t = setTimeout(() => { t.classList.add('hidden'); t.style.pointerEvents = ''; }, 6000);
+  clearTimeout(toast._t); toast._t = setTimeout(() => { t.classList.add('hidden'); t.style.pointerEvents = ''; t.style.cssText = ''; }, 2000);
 }
 function hideSheet() {
   const wasOpen = !$('sheet').classList.contains('hidden');
