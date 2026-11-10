@@ -899,6 +899,7 @@ function setHL(win, range) {
 }
 
 async function onTap(e, doc, win) {
+  if (!$('sheet').classList.contains('hidden')) { hideSheet(); return; }   // bar open: any tap only closes it
   if (e.target.closest && e.target.closest('a[href]')) return;
   const hit = wordAtPoint(doc, e.clientX, e.clientY);
   if (!hit) {
@@ -907,10 +908,6 @@ async function onTap(e, doc, win) {
     const vr = $('viewer').getBoundingClientRect();
     const frac = (fr.left + e.clientX - vr.left) / vr.width;
     if (frac < 0.18) rendition.prev(); else if (frac > 0.82) rendition.next();
-    return;
-  }
-  if (lastTap && !$('sheet').classList.contains('hidden') && lastTap.node === hit.range.startContainer && lastTap.off === hit.range.startOffset) {
-    if (lastTap.save) lastTap.save();
     return;
   }
   lastTap = { word: hit.word, node: hit.range.startContainer, off: hit.range.startOffset, save: null };
@@ -928,11 +925,12 @@ async function onTap(e, doc, win) {
   try { res = await lookup(hit.word); } catch (err) { console.error(err); res = { word: hit.word, groups: [], dim: null, comp: null }; }
   if (token !== tapToken) return;
   renderSheet(res, sent);
+  if (!words.some((x) => x.word === res.word)) $('saveBtn').click();   // looking a word up saves it to practice
 }
 
 /* ----- bottom sheet ----- */
 function hideSheet() { tapToken++; lastTap = null; $('sheet').classList.add('hidden'); clearHL(); }
-document.addEventListener('click', (e) => { const sh = $('sheet'); if (!sh.classList.contains('hidden') && !sh.contains(e.target)) hideSheet(); }, true);
+document.addEventListener('click', (e) => { const sh = $('sheet'); if (!sh.classList.contains('hidden') && !sh.contains(e.target)) { hideSheet(); e.stopPropagation(); e.preventDefault(); } }, true);
 $('sheetClose').onclick = hideSheet;
 function ctxHtml(sent) {
   const t = sent.text, a = sent.a, b = sent.b;
@@ -1013,7 +1011,6 @@ function renderSheet(res, sent) {
     saveWords(); renderSheet(res, sent);
   };
   $('knownBtn').onclick = () => { const k = w.toLowerCase(); if (known.has(k)) known.delete(k); else known.add(k); saveKnown(); renderSheet(res, sent); };
-  if (lastTap && lastTap.word === w) lastTap.save = () => { if (words.some((x) => x.word === w)) toast('Already saved'); else $('saveBtn').click(); };
   if (!res.groups.length) fillOnline(w);
   const mb = $('moreBtn');
   if (mb) mb.onclick = () => {
